@@ -20,7 +20,12 @@ func main() {
 
 	sm := mux.NewRouter()
 
-	handlers.CORS()
+	handlers.CORS(handlers.AllowedHeaders([]string{"http://localhost:" + port}))
+
+	authHandler := NewAuth()
+
+	sm.HandleFunc("/login", authHandler.Login).Methods("POST")
+	sm.HandleFunc("/ping", authHandler.Ping).Methods("GET")
 
 	s := &http.Server{
 		Addr:         ":" + port,
@@ -32,7 +37,7 @@ func main() {
 	}
 
 	go func() {
-		l.Info("Starting server on Port 8080")
+		l.Info("Starting server...", "port", port)
 		err := s.ListenAndServe()
 		if err != nil {
 			log.Fatal(err)
