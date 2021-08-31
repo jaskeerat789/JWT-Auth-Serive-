@@ -57,13 +57,13 @@ func (a *Auth) Login(w http.ResponseWriter, r *http.Request) {
 	reqBody := &user{}
 	err := reqBody.fromJson(r.Body)
 	if err != nil {
-		a.l.Error("Unable to unmarshal json", "error", err)
+		a.l.Info("Unable to unmarshal json", "error", err)
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	if !reqBody.checkCreds() {
-		a.l.Error("Wrong creds", "creds", reqBody)
+		a.l.Info("Wrong creds", "creds", reqBody)
 		http.Error(w, "Wrong credentials ", http.StatusUnauthorized)
 		return
 	}
@@ -83,7 +83,87 @@ func (a *Auth) Login(w http.ResponseWriter, r *http.Request) {
 
 }
 
+func (a *Auth) AuthMiddleware(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		token := &response{}
+		token.fromJson(r.Body)
+
+		if token.AuthToken == "" || token.RefreshToken == "" {
+			a.l.Info("Tokens not found", "tokens", token)
+			http.Error(w, "Token not Provided", http.StatusForbidden)
+			return
+		}
+
+		claims := &claim{}
+
+		authToken, err := jwt.ParseWithClaims(token.AuthToken, claims, func(t *jwt.Token) (interface{}, error) {
+			return jwtKey, nil
+		})
+
+		refreshToken, err := jwt.ParseWithClaims(token.RefreshToken, claims, func(t *jwt.Token) (interface{}, error) {
+			return jwtKey, nil
+		})
+
+		if err != nil {
+			if err == jwt.ErrSignatureInvalid {
+				http.Error(w, "Invalid signature", http.StatusForbidden)
+				return
+			}
+
+			http.Error(w, "Invalid tokens", http.StatusBadRequest)
+			return
+		}
+
+		if !authToken.Valid || !refreshToken.Valid {
+			http.Error(w, "Invalid tokens", http.StatusBadRequest)
+			return
+		}
+
+		h.ServeHTTP(w, r)
+	})
+}
+
 func (a *Auth) RefreshToken(w http.ResponseWriter, r *http.Request) {
+
+	tkn := &response{}
+	tkn.fromJson(r.Body)
+	authClaims := &claim{}
+	refreshClaims := &claim{}
+
+	authToken, err := jwt.ParseWithClaims(tkn.AuthToken, authClaims, func(t *jwt.Token) (interface{}, error) {
+		return jwtKey, nil
+	})
+
+	refreshToken, err := jwt.ParseWithClaims(tkn.RefreshToken, refreshClaims, func(t *jwt.Token) (interface{}, error) {
+		return jwtKey, nil
+	})
+
+	if err != nil {
+		if err == jwt.ErrSignatureInvalid {
+			http.Error(w, "Invalid signature", http.StatusForbidden)
+			return
+		}
+
+		http.Error(w, "Invalid tokens", http.StatusBadRequest)
+		return
+	}
+
+	if !authToken.Valid && refreshToken.Valid && !checkExpiry(authClaims) && !checkExpiry(refreshClaims) {
+		newAuthToken := &token{Validity: 5 * time.Minute}
+		newAuthTokenString, err := newAuthToken.generateToken(&user{Username: authClaims.Username})
+		if err != nil {
+			a.l.Error("Error in generating tokens", "error", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+		tkn.AuthToken = newAuthTokenString
+		tkn.toJson(w)
+		return
+
+	} else {
+		http.Error(w, "Invalid tokens", http.StatusBadRequest)
+		return
+	}
 
 }
 
@@ -113,10 +193,18 @@ func (u *user) fromJson(r io.Reader) error {
 	return d.Decode(u)
 }
 
+func (rp *response) fromJson(r io.Reader) error {
+	d := json.NewDecoder(r)
+	return d.Decode(rp)
+}
+
 func (u *user) checkCreds() bool {
 	if u.Username == "admin" && u.Password == "password" {
-		println("True")
 		return true
 	}
 	return false
+}
+
+func checkExpiry(c *claim) bool {
+	return time.Unix(claim.ExpiresAt, 0).Sub(time.Now()) > 30*time.Second
 }
