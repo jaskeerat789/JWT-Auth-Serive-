@@ -25,7 +25,7 @@ func main() {
 	authHandler := NewAuth()
 
 	sm.HandleFunc("/login", authHandler.Login).Methods("POST")
-	sm.HandleFunc("/ping", authHandler.Ping).Methods("GET")
+	sm.Handle("/ping", authHandler.AuthMiddleware(http.HandlerFunc(authHandler.Ping))).Methods("GET")
 
 	s := &http.Server{
 		Addr:         ":" + port,
