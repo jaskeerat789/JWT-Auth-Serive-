@@ -122,7 +122,7 @@ func (a *Auth) AuthMiddleware(h http.Handler) http.Handler {
 }
 
 func (a *Auth) RefreshToken(w http.ResponseWriter, r *http.Request) {
-
+	a.l.Info("Refresh Token")
 	refreshToken := r.Header.Get("Authorization")
 	refreshClaims := &claim{}
 
@@ -132,10 +132,12 @@ func (a *Auth) RefreshToken(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		if err == jwt.ErrSignatureInvalid {
+			a.l.Info("Invalid signature", "error", err)
 			http.Error(w, "Invalid signature", http.StatusForbidden)
 			return
 		}
 
+		a.l.Info("can not parse token", "error", err)
 		http.Error(w, "Invalid tokens", http.StatusBadRequest)
 		return
 	}
@@ -153,6 +155,7 @@ func (a *Auth) RefreshToken(w http.ResponseWriter, r *http.Request) {
 		return
 
 	} else {
+		a.l.Info("Invalid token", "err", err)
 		http.Error(w, "Invalid tokens", http.StatusBadRequest)
 		return
 	}
@@ -198,5 +201,5 @@ func (u *user) checkCreds() bool {
 }
 
 func checkExpiry(c *claim) bool {
-	return time.Unix(c.ExpiresAt, 0).Sub(time.Now()) > 30*time.Second
+	return time.Unix(c.ExpiresAt, 0).Sub(time.Now()) < 30*time.Second
 }
